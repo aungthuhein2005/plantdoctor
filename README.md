@@ -13,7 +13,7 @@
 [![Dataset](https://img.shields.io/badge/Dataset-PlantSeg-20BEFF?logo=kaggle&logoColor=white)](https://www.kaggle.com/datasets/weitianqi/plantseg)
 [![Weights license](https://img.shields.io/badge/Weights-CC_BY--NC_4.0-lightgrey)](https://creativecommons.org/licenses/by-nc/4.0/)
 
-[**Results**](#-results) · [**Quick start**](#-quick-start) · [**Run on HPC**](#hpc) · [**Model card**](https://huggingface.co/aungthuhein-dev/plantdoctor-segformer-b4) · [**Experiment report**](docs/EXPERIMENTS.md)
+[**Results**](#benchmark-results) · [**Quick start**](#use-the-model) · [**Run on HPC**](#hpc) · [**Model card**](https://huggingface.co/aungthuhein-dev/plantdoctor-segformer-b4) · [**Experiment report**](docs/EXPERIMENTS.md)
 
 </div>
 
@@ -82,6 +82,8 @@ flowchart LR
 > PlantSeg labels lesions but not whole leaves, so the leaf area is estimated from leaf colour plus the
 > predicted lesions (`plantdoctor/analysis.py`). The percentages are approximate.
 
+<a id="benchmark-results"></a>
+
 ## 📈 Results
 
 Test split: 2,295 images, all models on one **NVIDIA H200 MIG 3g.71gb** slice.
@@ -123,6 +125,8 @@ area error and bf16 latency: <a href="results/benchmark.md">results/benchmark.md
 - **Rare diseases are the weak spot:** 5 classes score 0% IoU and 18 are below 20%.
 
 Full analysis: [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
+
+<a id="use-the-model"></a>
 
 ## 🚀 Quick start
 
