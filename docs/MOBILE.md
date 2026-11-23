@@ -8,6 +8,9 @@ report (disease, affected %, severity, mask) in **airplane mode**, at a median o
 
 ## 1. Exported model files
 
+Published in the model repo: [aungthuhein-dev/plantdoctor-segformer-b4/onnx](https://huggingface.co/aungthuhein-dev/plantdoctor-segformer-b4/tree/main/onnx)
+(`model.onnx` fp32, `model_fp16.onnx`, `model_int8.onnx`, `labels.json`).
+
 `scripts/export_mobile.py` (run by `slurm/export_mobile.sbatch`, CPU-only) converts a checkpoint to ONNX:
 
 | File | What it is |

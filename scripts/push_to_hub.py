@@ -114,6 +114,56 @@ mask = torch.nn.functional.interpolate(logits, size=img.size[::-1], mode="biline
 
 Or the full report: `python scripts/predict.py --ckpt best.pt --image leaf.jpg --out overlay.png`."""
 
+MOBILE = """## Mobile / offline (ONNX)
+
+ONNX exports for on-device inference with no internet are in [`onnx/`](onnx). The int8 model has been
+run on an **iPhone 14 Pro in airplane mode** (Safari / ONNX Runtime Web: {phone_ms} per photo on CPU; a
+native app with ONNX Runtime Mobile is expected to be several times faster).
+
+| File | Precision | Size | mIoU change* | CPU latency** |
+|---|---|--:|--:|--:|
+{rows}
+
+<sub>*vs the PyTorch model on {n_eval} test images. **ONNX Runtime {threads} threads on a server CPU
+(AMD EPYC); phone speed differs.</sub>
+
+**Input** `pixel_values`: float32 `[1, 3, {size}, {size}]`, RGB resized to {size}x{size}, `(x/255 - mean) / std`
+with mean `[0.485, 0.456, 0.406]` and std `[0.229, 0.224, 0.225]`.
+**Output** `logits`: float32 `[1, {n_all}, {out}, {out}]`; upsample to the image size, then argmax per pixel.
+Class names: [`onnx/labels.json`](onnx/labels.json).
+
+```python
+import numpy as np, onnxruntime as ort
+from PIL import Image
+
+sess = ort.InferenceSession("onnx/model_int8.onnx")
+img = Image.open("leaf.jpg").convert("RGB").resize(({size}, {size}), Image.BILINEAR)
+x = (np.asarray(img, np.float32) / 255 - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+x = x.transpose(2, 0, 1)[None].astype(np.float32)
+logits = sess.run(["logits"], {{"pixel_values": x}})[0]      # (1, {n_all}, {out}, {out})
+mask = logits[0].argmax(0)                                  # 0 = background, 1..{n_cls} = disease
+```
+
+Try it on your phone: [offline test page]({test_page}).
+
+"""
+
+ONNX_FILES = {"fp32": "model.onnx", "fp16": "model_fp16.onnx", "int8": "model_int8.onnx"}
+
+
+def mobile_section(mobile_dir, size, n_all, test_page, phone_ms):
+    rep = json.load(open(os.path.join(mobile_dir, "report.json")))
+    ref = rep["variants"]["pytorch_fp32"]["mIoU"]
+    rows = []
+    for v, fname in ONNX_FILES.items():
+        r = rep["variants"].get(f"onnx_{v}")
+        if r:
+            rows.append(f"| `onnx/{fname}` | {v} | {r['size_MB']:.0f} MB | {100 * (r['mIoU'] - ref):+.2f} | "
+                        f"{r['cpu_latency_ms']:.0f} ms |")
+    return MOBILE.format(rows="\n".join(rows), n_eval=rep["n_eval"], threads=rep["threads"], size=size,
+                         n_all=n_all, n_cls=n_all - 1, out=size // 4, test_page=test_page, phone_ms=phone_ms)
+
+
 USAGE_UNET = """```python
 import segmentation_models_pytorch as smp
 model = smp.from_pretrained("{repo}").eval()
@@ -130,6 +180,10 @@ def main():
     ap.add_argument("--report", default="results")
     ap.add_argument("--private", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--mobile-dir", default=None,
+                    help="scripts/export_mobile.py output to include as onnx/ (default: outputs/mobile/<name>)")
+    ap.add_argument("--test-page", default="https://aungthuhein-dev-plantdoctor-mobile-test.static.hf.space")
+    ap.add_argument("--phone-ms", default="4.2 s", help="measured on-phone time to quote in the card")
     a = ap.parse_args()
 
     ckpt = a.ckpt or json.load(open(os.path.join(a.report, "winner.json")))["checkpoint"]
@@ -175,6 +229,18 @@ def main():
         epochs=res["epochs"], bs=res["batch_size"], best_ep=res["best_epoch"] + 1,
         usage=(USAGE_SEGFORMER if seg else USAGE_UNET).format(repo=a.repo, size=size),
     )
+    mobile_dir = a.mobile_dir or os.path.join("outputs", "mobile", cfg["name"])
+    if seg and os.path.exists(os.path.join(mobile_dir, "report.json")):
+        os.makedirs(os.path.join(stage, "onnx"))
+        for v, fname in ONNX_FILES.items():
+            src = os.path.join(mobile_dir, f"model_{v}.onnx")
+            if os.path.exists(src):
+                shutil.copy(src, os.path.join(stage, "onnx", fname))
+        shutil.copy(os.path.join(mobile_dir, "labels.json"), os.path.join(stage, "onnx", "labels.json"))
+        section = mobile_section(mobile_dir, size, len(id2label), a.test_page, a.phone_ms)
+        card = card.replace("## License and data", section + "## License and data")
+        card = card.replace("tags:\n", "tags:\n- onnx\n- mobile\n", 1)
+        print(f"including ONNX exports from {mobile_dir}")
     with open(os.path.join(stage, "README.md"), "w", encoding="utf-8") as f:
         f.write(card)
     print(f"export staged at {stage}")
