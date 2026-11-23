@@ -9,3 +9,9 @@ __pycache__/
 # internal planning doc
 prd.md
 *.pyc
+
+# mobile test page: large third-party runtime + exported models (rebuild with mobile_test/build.sh)
+mobile_test/ort/
+mobile_test/models/
+mobile_test/_test.jpg
+*.onnx

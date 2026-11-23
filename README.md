@@ -157,6 +157,21 @@ python scripts/predict.py --ckpt best.pt --image leaf.jpg --out overlay.png
 
 <sub>`best.pt` is in the <a href="https://huggingface.co/aungthuhein-dev/plantdoctor-segformer-b4/tree/main">model repo</a>.</sub>
 
+## 📱 Runs offline on phones
+
+The model is exported to ONNX (`scripts/export_mobile.py`) and **confirmed to run on an iPhone 14 Pro in
+airplane mode**.
+
+| Version | Size | mIoU change | iPhone 14 Pro (Safari, CPU) |
+|:--|--:|--:|--:|
+| SegFormer-B4 fp32 | 257 MB | 0.00 | – |
+| SegFormer-B4 fp16 | 129 MB | −0.01 | – |
+| **SegFormer-B4 int8** | **69 MB** | **−0.46** | **4.2 s** |
+
+Try it on your phone: [offline test page](https://aungthuhein-dev-plantdoctor-mobile-test.static.hf.space)
+(load a model, switch on airplane mode, diagnose). A native app with ONNX Runtime Mobile should be about
+10× faster than the browser. Details: [docs/MOBILE.md](docs/MOBILE.md).
+
 <a id="hpc"></a>
 
 ## 🖥️ Reproduce on an HPC (SLURM)
@@ -220,8 +235,9 @@ plantdoctor/
 ├── scripts/            download · prepare · train · aggregate · predict · push_to_hub
 ├── slurm/              train / smoke / GPU-test job scripts and submit_all.sh
 ├── space/              Gradio demo app (Hugging Face Space, ZeroGPU-ready)
+├── mobile_test/        offline on-device test page (ONNX Runtime Web, works in airplane mode)
 ├── results/            benchmark table, charts, per-model logs and results.json
-└── docs/               experiment report
+└── docs/               experiment report and mobile feasibility test
 ```
 
 ## 📜 License and data

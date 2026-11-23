@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1e7d4c">
+<title>PlantDoctor Offline Test</title>
+<style>
+  :root { --bg:#f6f8f6; --card:#fff; --ink:#18241c; --muted:#5f6f64; --line:#dfe6e1; --accent:#1e7d4c; --warn:#b26a00; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f1511; --card:#18211b; --ink:#e6efe8; --muted:#9db0a3; --line:#2a362e; --accent:#4cc38a; --warn:#f0b04a; --bad:#ff8a80; } }
+  :root[data-theme="dark"] { --bg:#0f1511; --card:#18211b; --ink:#e6efe8; --muted:#9db0a3; --line:#2a362e; --accent:#4cc38a; --warn:#f0b04a; --bad:#ff8a80; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:16px 16px 48px; }
+  h1 { font-size:1.4rem; margin:.2rem 0 .1rem; }
+  .sub { color:var(--muted); margin:0 0 1rem; font-size:.92rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin:12px 0; }
+  .card h2 { font-size:1rem; margin:0 0 .6rem; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:.4rem 0 .2rem; }
+  select, button, .file { width:100%; font:inherit; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  button { background:var(--accent); color:#fff; border:0; font-weight:600; margin-top:10px; }
+  button:disabled { opacity:.45; }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:99px; font-size:.8rem; border:1px solid var(--line); margin:2px 4px 2px 0; }
+  .ok { color:var(--accent); } .warnc { color:var(--warn); } .badc { color:var(--bad); }
+  .bar { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; width:0; background:var(--accent); transition:width .2s; }
+  canvas { width:100%; height:auto; border-radius:10px; display:block; margin-top:8px; }
+  table { width:100%; border-collapse:collapse; font-size:.95rem; }
+  td { padding:6px 4px; border-bottom:1px solid var(--line); } td:last-child { text-align:right; font-weight:600; }
+  .big { font-size:1.15rem; font-weight:700; margin:.2rem 0 .5rem; }
+  .muted { color:var(--muted); font-size:.85rem; }
+  pre { white-space:pre-wrap; font-size:.75rem; color:var(--muted); margin:0; max-height:180px; overflow:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🌿 PlantDoctor offline test</h1>
+  <p class="sub">Runs the segmentation model on this phone. Load a model once, switch on airplane mode, then diagnose photos.</p>
+
+  <div class="card">
+    <h2>1 · Status</h2>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Model</h2>
+    <label for="model">Model (downloaded once, then cached)</label>
+    <select id="model"></select>
+    <label for="ep">Engine</label>
+    <select id="ep">
+      <option value="wasm">CPU (WebAssembly)</option>
+      <option value="webgpu">GPU (WebGPU)</option>
+    </select>
+    <button id="load">Load model</button>
+    <div class="bar"><div id="prog"></div></div>
+    <p class="muted" id="loadinfo"></p>
+  </div>
+
+  <div class="card">
+    <h2>3 · Diagnose</h2>
+    <label for="file">Leaf photo (camera or library)</label>
+    <input class="file" id="file" type="file" accept="image/*">
+    <div class="row">
+      <button id="run" disabled>Diagnose</button>
+      <button id="bench" disabled>Speed test ×5</button>
+    </div>
+  </div>
+
+  <div class="card" id="resultcard" hidden>
+    <h2>Result</h2>
+    <div class="big" id="disease"></div>
+    <table id="report"></table>
+    <canvas id="out"></canvas>
+    <p class="muted">Red: diseased regions · green: estimated leaf outline</p>
+  </div>
+
+  <div class="card">
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </div>
+</main>
+
+<script src="ort/ort.webgpu.min.js"></script>
+<script>
+const MODELS = [
+  // filled by build step; size in MB for display
+  { id: "segformer_b4_int8", name: "SegFormer-B4 · int8", file: "models/segformer_b4_int8.onnx", mb: 0 },
+  { id: "segformer_b4_fp16", name: "SegFormer-B4 · fp16", file: "models/segformer_b4_fp16.onnx", mb: 0 },
+  { id: "segformer_b4_fp32", name: "SegFormer-B4 · fp32", file: "models/segformer_b4_fp32.onnx", mb: 0 },
+  { id: "segformer_b2_int8", name: "SegFormer-B2 · int8", file: "models/segformer_b2_int8.onnx", mb: 0 },
+  { id: "segformer_b2_fp16", name: "SegFormer-B2 · fp16", file: "models/segformer_b2_fp16.onnx", mb: 0 },
+];
+const SIZE = 512, MEAN = [0.485, 0.456, 0.406], STD = [0.229, 0.224, 0.225];
+const SEVERITY = [[1, "Healthy"], [10, "Mild"], [30, "Moderate"], [101, "Severe"]];
+const CACHE = "plantdoctor-models-v1";
+const $ = (id) => document.getElementById(id);
+let session = null, labels = null, img = null, modelInfo = null;
+
+function log(msg) { $("log").textContent = `${new Date().toLocaleTimeString()}  ${msg}\n` + $("log").textContent; }
+
+async function fileList() {
+  try { const r = await fetch("models/manifest.json", { cache: "no-cache" }); if (r.ok) return r.json(); } catch (e) {}
+  return null;
+}
+
+async function refreshStatus() {
+  const cached = [];
+  try { const c = await caches.open(CACHE); for (const m of MODELS) if (await c.match(m.file)) cached.push(m.name); } catch (e) {}
+  const online = navigator.onLine;
+  const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+  const threads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 4) : 1;
+  $("status").innerHTML =
+    `<span class="pill ${online ? "warnc" : "ok"}">${online ? "🌐 Online" : "✈️ Offline"}</span>` +
+    `<span class="pill ${sw ? "ok" : "warnc"}">${sw ? "App cached for offline" : "Offline cache not active yet"}</span>` +
+    `<span class="pill">${threads} CPU thread${threads > 1 ? "s" : ""}</span>` +
+    `<span class="pill ${navigator.gpu ? "ok" : ""}">${navigator.gpu ? "WebGPU available" : "No WebGPU"}</span>` +
+    `<div class="muted" style="margin-top:6px">Cached models: ${cached.length ? cached.join(", ") : "none yet"}</div>`;
+}
+
+async function fetchCached(url, onProgress) {
+  const cache = await caches.open(CACHE);
+  let res = await cache.match(url);
+  if (res) { onProgress(1); return new Uint8Array(await res.arrayBuffer()); }
+  res = await fetch(url);
+  if (!res.ok) throw new Error(`download failed: ${res.status}`);
+  const total = +res.headers.get("content-length") || 0;
+  const reader = res.body.getReader(); const chunks = []; let got = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; if (total) onProgress(got / total); }
+  const buf = new Uint8Array(got); let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
+  await cache.put(url, new Response(buf, { headers: { "content-type": "application/octet-stream" } }));
+  onProgress(1);
+  return buf;
+}
+
+async function loadModel() {
+  $("load").disabled = true; $("run").disabled = true; $("bench").disabled = true;
+  try {
+    modelInfo = MODELS.find((m) => m.id === $("model").value);
+    const ep = $("ep").value;
+    ort.env.wasm.wasmPaths = new URL("ort/", location.href).href;
+    ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 4) : 1;
+    log(`loading ${modelInfo.name} on ${ep}, threads=${ort.env.wasm.numThreads}`);
+    const t0 = performance.now();
+    labels = labels || JSON.parse(new TextDecoder().decode(await fetchCached("models/labels.json", () => {})));
+    const bytes = await fetchCached(modelInfo.file, (p) => ($("prog").style.width = `${Math.round(p * 100)}%`));
+    const t1 = performance.now();
+    if (session) { try { await session.release(); } catch (e) {} }
+    session = await ort.InferenceSession.create(bytes, { executionProviders: [ep], graphOptimizationLevel: "all" });
+    const t2 = performance.now();
+    $("loadinfo").textContent = `${modelInfo.name}: ${(bytes.length / 1e6).toFixed(1)} MB · download/cache ${((t1 - t0) / 1000).toFixed(1)} s · init ${((t2 - t1) / 1000).toFixed(1)} s · engine ${ep}`;
+    log(`ready (${(bytes.length / 1e6).toFixed(1)} MB, init ${((t2 - t1) / 1000).toFixed(1)} s)`);
+    $("run").disabled = !img; $("bench").disabled = !img;
+  } catch (e) {
+    log(`ERROR: ${e.message || e}`); $("loadinfo").innerHTML = `<span class="badc">${e.message || e}</span>`;
+  }
+  $("load").disabled = false; refreshStatus();
+}
+
+function preprocess(image) {
+  const c = document.createElement("canvas"); c.width = SIZE; c.height = SIZE;
+  const g = c.getContext("2d"); g.drawImage(image, 0, 0, SIZE, SIZE);
+  const d = g.getImageData(0, 0, SIZE, SIZE).data, n = SIZE * SIZE, x = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) for (let ch = 0; ch < 3; ch++) x[ch * n + i] = (d[i * 4 + ch] / 255 - MEAN[ch]) / STD[ch];
+  return { tensor: new ort.Tensor("float32", x, [1, 3, SIZE, SIZE]), rgba: d };
+}
+
+function rgbToHsv(r, g, b) {  // OpenCV-style: H 0-180, S/V 0-255
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (h * 30 + 180) % 180;
+  return [h, mx ? (d / mx) * 255 : 0, mx];
+}
+
+function postprocess(logits, rgba) {
+  const [, C, H, W] = logits.dims, L = logits.data, n = H * W;
+  const pred = new Uint16Array(n), conf = new Float32Array(n);
+  for (let i = 0; i < n; i++) {  // argmax + softmax prob of the winner
+    let best = 0, bv = -Infinity;
+    for (let c = 0; c < C; c++) { const v = L[c * n + i]; if (v > bv) { bv = v; best = c; } }
+    let s = 0; for (let c = 0; c < C; c++) s += Math.exp(L[c * n + i] - bv);
+    pred[i] = best; conf[i] = 1 / s;
+  }
+  // leaf mask at model resolution: green/yellow vegetation (HSV) OR lesion, then fill holes from the border
+  const scale = SIZE / W, leaf = new Uint8Array(n);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x, p = (Math.floor((y + 0.5) * scale) * SIZE + Math.floor((x + 0.5) * scale)) * 4;
+    const [h, s, v] = rgbToHsv(rgba[p], rgba[p + 1], rgba[p + 2]);
+    leaf[i] = pred[i] > 0 || (h >= 20 && h <= 95 && s >= 35 && v >= 35) ? 1 : 0;
+  }
+  const outside = new Uint8Array(n), stack = [];
+  for (let x = 0; x < W; x++) { stack.push(x, (H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { stack.push(y * W, y * W + W - 1); }
+  while (stack.length) {
+    const i = stack.pop(); if (outside[i] || leaf[i]) continue; outside[i] = 1;
+    const x = i % W, y = (i / W) | 0;
+    if (x > 0) stack.push(i - 1); if (x < W - 1) stack.push(i + 1); if (y > 0) stack.push(i - W); if (y < H - 1) stack.push(i + W);
+  }
+  let leafPx = 0, lesionPx = 0; const counts = new Map(), confSum = new Map();
+  for (let i = 0; i < n; i++) {
+    if (!outside[i]) leaf[i] = 1;
+    if (leaf[i]) leafPx++;
+    if (pred[i] > 0) { lesionPx++; counts.set(pred[i], (counts.get(pred[i]) || 0) + 1); confSum.set(pred[i], (confSum.get(pred[i]) || 0) + conf[i]); }
+  }
+  const affected = leafPx ? (100 * lesionPx) / leafPx : 0;
+  const severity = SEVERITY.find(([u]) => affected < u)[1];
+  let disease = "Healthy", confidence = null;
+  if (lesionPx) {
+    const [cid, cnt] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const name = labels[String(cid)] || `class ${cid}`;
+    if (severity === "Healthy") disease = `Healthy (trace of ${name})`;
+    else { disease = name; confidence = confSum.get(cid) / cnt; }
+  }
+  return { pred, leaf, H, W, affected, severity, disease, confidence };
+}
+
+function draw(r) {
+  const cv = $("out"), maxW = 900, s = Math.min(1, maxW / img.naturalWidth);
+  cv.width = Math.round(img.naturalWidth * s); cv.height = Math.round(img.naturalHeight * s);
+  const g = cv.getContext("2d"); g.drawImage(img, 0, 0, cv.width, cv.height);
+  const m = document.createElement("canvas"); m.width = r.W; m.height = r.H;
+  const mg = m.getContext("2d"), md = mg.createImageData(r.W, r.H);
+  for (let i = 0; i < r.W * r.H; i++) {
+    const edge = r.leaf[i] && (!r.leaf[i - 1] || !r.leaf[i + 1] || !r.leaf[i - r.W] || !r.leaf[i + r.W]);
+    if (r.pred[i] > 0) { md.data.set([255, 0, 0, 140], i * 4); } else if (edge) { md.data.set([0, 255, 0, 255], i * 4); }
+  }
+  mg.putImageData(md, 0, 0);
+  g.imageSmoothingEnabled = false; g.drawImage(m, 0, 0, cv.width, cv.height);
+}
+
+async function diagnose(showResult = true) {
+  const t0 = performance.now();
+  const { tensor, rgba } = preprocess(img);
+  const t1 = performance.now();
+  const out = await session.run({ pixel_values: tensor });
+  const t2 = performance.now();
+  const r = postprocess(out.logits, rgba);
+  const t3 = performance.now();
+  r.times = { pre: t1 - t0, infer: t2 - t1, post: t3 - t2, total: t3 - t0 };
+  if (showResult) {
+    $("resultcard").hidden = false;
+    $("disease").textContent = `Disease prediction: ${r.disease}${r.confidence != null ? ` (${r.confidence.toFixed(2)})` : ""}`;
+    $("report").innerHTML =
+      `<tr><td>Affected leaf area</td><td>${r.affected.toFixed(1)}%</td></tr>` +
+      `<tr><td>Healthy leaf area</td><td>${(100 - r.affected).toFixed(1)}%</td></tr>` +
+      `<tr><td>Severity</td><td>${r.severity}</td></tr>` +
+      `<tr><td>Inference time</td><td>${(r.times.infer / 1000).toFixed(2)} s</td></tr>` +
+      `<tr><td>Total (prepare + model + report)</td><td>${(r.times.total / 1000).toFixed(2)} s</td></tr>` +
+      `<tr><td>Model · engine · network</td><td>${modelInfo.name} · ${$("ep").value} · ${navigator.onLine ? "online" : "offline ✈️"}</td></tr>`;
+    draw(r);
+  }
+  log(`${modelInfo.name}: infer ${r.times.infer.toFixed(0)} ms, total ${r.times.total.toFixed(0)} ms -> ${r.disease}, ${r.affected.toFixed(1)}%`);
+  return r;
+}
+
+async function bench() {
+  $("run").disabled = $("bench").disabled = true;
+  const ts = [];
+  for (let k = 0; k < 5; k++) ts.push((await diagnose(k === 4)).times.infer);
+  ts.sort((a, b) => a - b);
+  log(`speed test ${modelInfo.name} (${$("ep").value}): median ${ts[2].toFixed(0)} ms, min ${ts[0].toFixed(0)} ms, max ${ts[4].toFixed(0)} ms`);
+  $("run").disabled = $("bench").disabled = false;
+}
+
+$("file").addEventListener("change", (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const im = new Image(); im.onload = () => { img = im; $("run").disabled = $("bench").disabled = !session; log(`photo ${im.naturalWidth}x${im.naturalHeight}`); };
+  im.src = URL.createObjectURL(f);
+});
+$("load").onclick = loadModel;
+$("run").onclick = async () => { $("run").disabled = true; try { await diagnose(); } catch (e) { log(`ERROR: ${e.message || e}`); } $("run").disabled = false; };
+$("bench").onclick = () => bench().catch((e) => log(`ERROR: ${e.message || e}`));
+addEventListener("online", refreshStatus); addEventListener("offline", refreshStatus);
+
+(async () => {
+  const man = await fileList();
+  if (man) for (const m of MODELS) if (man[m.file]) m.mb = man[m.file];
+  $("model").innerHTML = MODELS.filter((m) => !man || man[m.file]).map((m) => `<option value="${m.id}">${m.name}${m.mb ? ` (${m.mb.toFixed(0)} MB)` : ""}</option>`).join("");
+  try {  // preselect a model that is already downloaded (important when offline)
+    const c = await caches.open(CACHE);
+    for (const m of MODELS) if (await c.match(m.file)) { $("model").value = m.id; break; }
+  } catch (e) {}
+  if (!navigator.gpu) $("ep").querySelector('[value="webgpu"]').disabled = true;
+  if ("serviceWorker" in navigator) {
+    const reg = await navigator.serviceWorker.register("sw.js");
+    // first visit: reload once so the service worker can enable offline mode + multithreading
+    if (!navigator.serviceWorker.controller) {
+      await navigator.serviceWorker.ready;
+      if (!sessionStorage.getItem("pd-reloaded")) { try { sessionStorage.setItem("pd-reloaded", "1"); } catch (e) {} location.reload(); return; }
+    }
+  }
+  refreshStatus();
+  log("ready. Load a model, then try airplane mode.");
+})();
+</script>
+</body>
+</html>
