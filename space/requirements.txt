@@ -1,0 +1,6 @@
+torch
+transformers>=5.0
+spaces
+opencv-python-headless
+numpy
+pillow

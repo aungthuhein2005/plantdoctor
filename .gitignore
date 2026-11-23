@@ -1,0 +1,11 @@
+.venv/
+.cache/
+data/
+outputs/
+logs/
+__pycache__/
+*.pt
+
+# internal planning doc
+prd.md
+*.pyc

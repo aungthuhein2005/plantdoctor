@@ -1,0 +1,4 @@
+{
+  "name": "segformer_b4",
+  "checkpoint": "outputs/segformer_b4/best.pt"
+}

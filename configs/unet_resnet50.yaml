@@ -1,0 +1,15 @@
+# Shared recipe for every benchmark model; only model + lr differ.
+name: unet_resnet50
+model: unet_resnet50
+img_size: 512
+epochs: 50
+batch_size: 16
+lr: 1.0e-4            # encoder LR (AdamW)
+head_lr_mult: 10.0 # decoder / head LR = lr * 10
+weight_decay: 0.01
+warmup_iters: 1500
+dice_weight: 1.0   # loss = CE + dice_weight * Dice
+grad_clip: 1.0
+amp: true          # bf16 autocast
+eval_every: 2
+seed: 42
